@@ -230,7 +230,7 @@ resource "aws_eks_cluster" "my_eks_cluster" {
       aws_subnet.private_subnet_a.id,
       aws_subnet.private_subnet_c.id
     ]
-    endpoint_public_access = false
+    endpoint_public_access = true
     endpoint_private_access = true
   }
 
@@ -286,6 +286,16 @@ resource "aws_eks_node_group" "eks_node_group" {
 
   tags = {
     Name = "chanwoo-node-group"
+  }
+
+# 태그로 EC2 인스턴스 이름 설정
+  remote_access {
+    ec2_ssh_key = "my-key" # EC2에 접근할 SSH 키 설정
+    source_security_group_ids = [aws_security_group.eks_security_group.id]
+
+    tags = {
+      "Name" = "chanwoo-node-${count.index + 1}"
+    }
   }
 }
 
