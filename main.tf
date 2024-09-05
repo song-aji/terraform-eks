@@ -352,7 +352,7 @@ terraform {
     organization = "songaji-or"
 
     workspaces {
-      name = "AI-friend"
+      name = "terraform-eks"
     }
   }
 }
