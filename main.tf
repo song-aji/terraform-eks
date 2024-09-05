@@ -284,10 +284,6 @@ resource "aws_eks_node_group" "eks_node_group" {
   instance_types = ["t3.small"]
   ami_type       = "AL2_x86_64"
 
-  tags = {
-    Name = "chanwoo-node-group"
-  }
-
 # 태그로 EC2 인스턴스 이름 설정
   remote_access {
     ec2_ssh_key = "my-key" # EC2에 접근할 SSH 키 설정
