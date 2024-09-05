@@ -288,10 +288,12 @@ resource "aws_eks_node_group" "eks_node_group" {
   remote_access {
     ec2_ssh_key = "my-key" # EC2에 접근할 SSH 키 설정
     source_security_group_ids = [aws_security_group.eks_security_group.id]
-
-    tags = {
-      "Name" = "chanwoo-node-${count.index + 1}"
-    }
+  }
+  # EC2 인스턴스에 적용될 태그
+  tags = {
+    "Name"        = "chanwoo-node"  # 기본 태그
+    "Environment" = "development"
+    "Owner"       = "chanwoo"
   }
 }
 
