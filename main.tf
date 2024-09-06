@@ -1,4 +1,4 @@
-# Terraform의 AWS 프로바이더 설정
+# AWS 프로바이더 설정
 provider "aws" {
   region = "ap-northeast-2"
 }
@@ -42,7 +42,9 @@ resource "aws_subnet" "public_subnet_a" {
   availability_zone       = "ap-northeast-2a"
   map_public_ip_on_launch = true
   tags = {
-    Name = "chanwoo-public-subnet-a"
+    Name                              = "chanwoo-public-subnet-a"
+    "kubernetes.io/role/elb"          = "1"        # ELB용 퍼블릭 서브넷 태그
+    "kubernetes.io/cluster/eks-cluster" = "shared" # 클러스터 태그
   }
 }
 
@@ -53,7 +55,9 @@ resource "aws_subnet" "public_subnet_c" {
   availability_zone       = "ap-northeast-2c"
   map_public_ip_on_launch = true
   tags = {
-    Name = "chanwoo-public-subnet-c"
+    Name                              = "chanwoo-public-subnet-c"
+    "kubernetes.io/role/elb"          = "1"        # ELB용 퍼블릭 서브넷 태그
+    "kubernetes.io/cluster/eks-cluster" = "shared" # 클러스터 태그
   }
 }
 
@@ -122,6 +126,13 @@ resource "aws_security_group" "alb_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  ingress {
+    from_port   = 443  # HTTPS를 사용하는 경우
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -136,7 +147,7 @@ resource "aws_security_group" "alb_sg" {
 
 # NAT 게이트웨이 생성
 resource "aws_eip" "nat_eip" {
-  domain = "vpc"  # Elastic IP가 VPC 내에서 사용됨을 명시
+  domain = "vpc"
 }
 
 resource "aws_nat_gateway" "nat_gateway" {
@@ -195,28 +206,68 @@ resource "aws_route_table_association" "private_subnet_c_association" {
   route_table_id = aws_route_table.private_route_table.id
 }
 
-# EKS 클러스터 역할 생성
-resource "aws_iam_role" "eks_cluster_role" {
-  name = "eks-cluster-role"
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Action": "sts:AssumeRole",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "eks.amazonaws.com"
-      }
-    }
-  ]
-}
-EOF
+# 보안 그룹 생성 (EKS 노드 그룹용)
+resource "aws_security_group" "eks_security_group" {
+  vpc_id = aws_vpc.eks_vpc.id
 
-  managed_policy_arns = [
-    "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
-    "arn:aws:iam::aws:policy/AmazonEKSServicePolicy",
-  ]
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 10250
+    to_port     = 10250
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # ALB와 통신을 위한 규칙 추가
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]  # ALB 보안 그룹과 연결
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "eks-security-group"
+  }
+}
+
+# Application Load Balancer와 관련된 IAM 정책 및 역할 설정 추가
+resource "aws_iam_policy" "aws_load_balancer_controller_policy" {
+  name   = "AWSLoadBalancerControllerIAMPolicy"
+  policy = file("path/to/iam_policy.json")  # 다운받은 정책 JSON 파일 경로
+}
+
+resource "aws_iam_role" "aws_load_balancer_controller_role" {
+  name = "aws-load-balancer-controller-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${data.aws_eks_cluster.cluster.identity[0].oidc.issuer}"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "attach_lb_policy" {
+  policy_arn = aws_iam_policy.aws_load_balancer_controller_policy.arn
+  role       = aws_iam_role.aws_load_balancer_controller_role.name
 }
 
 # EKS 클러스터 생성
@@ -232,36 +283,12 @@ resource "aws_eks_cluster" "my_eks_cluster" {
     ]
     endpoint_public_access = true
     endpoint_private_access = true
+    security_group_ids = [aws_security_group.eks_security_group.id]
   }
 
   tags = {
     Name = "chanwoo-eks-cluster"
   }
-}
-
-# EKS 노드 그룹 역할 생성
-resource "aws_iam_role" "eks_node_role" {
-  name = "eks-node-role"
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Action": "sts:AssumeRole",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "ec2.amazonaws.com"
-      }
-    }
-  ]
-}
-EOF
-
-  managed_policy_arns = [
-    "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
-    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
-    "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
-  ]
 }
 
 # EKS 노드 그룹 생성
@@ -284,73 +311,26 @@ resource "aws_eks_node_group" "eks_node_group" {
   instance_types = ["t3.small"]
   ami_type       = "AL2_x86_64"
 
-# 태그로 EC2 인스턴스 이름 설정
   remote_access {
-    ec2_ssh_key = "chanwoo-key" # EC2에 접근할 SSH 키 설정
+    ec2_ssh_key = "chanwoo-key"
     source_security_group_ids = [aws_security_group.eks_security_group.id]
   }
-  # EC2 인스턴스에 적용될 태그
-  tags = {
-    "Name"        = "chanwoo-node"  # 기본 태그
-    "Environment" = "development"
-    "Owner"       = "chanwoo"
-  }
-}
-
-# Global Load Balancer 설정 (AWS Global Accelerator)
-resource "aws_globalaccelerator_accelerator" "example" {
-  name    = "chanwoo-eks-glb"
-  enabled = true
-}
-
-resource "aws_globalaccelerator_listener" "example_listener" {
-  accelerator_arn = aws_globalaccelerator_accelerator.example.id
-  protocol        = "TCP"
-  port_range {
-    from_port = 80
-    to_port   = 80
-  }
-}
-
-# Global Accelerator 엔드포인트 그룹 (ALB를 엔드포인트로 설정)
-resource "aws_globalaccelerator_endpoint_group" "example_endpoint_group" {
-  listener_arn = aws_globalaccelerator_listener.example_listener.id
-  endpoint_configuration {
-    endpoint_id = aws_lb.example_alb.arn  # ALB ARN을 엔드포인트로 설정
-    weight      = 100
-  }
-
-  health_check_port     = 80
-  health_check_protocol = "TCP"
-}
-
-# 보안 그룹 생성 (EKS 노드 그룹용)
-resource "aws_security_group" "eks_security_group" {
-  vpc_id = aws_vpc.eks_vpc.id
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 10250
-    to_port     = 10250
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
   tags = {
-    Name = "eks-security-group"
+    Name        = "chanwoo-node"
+    Environment = "development"
+    Owner       = "chanwoo"
+  }
+}
+
+# Kubernetes 서비스 어카운트와 IAM 역할 연동 설정
+resource "kubernetes_service_account" "aws_load_balancer_controller_sa" {
+  metadata {
+    name      = "aws-load-balancer-controller"
+    namespace = "kube-system"
+    annotations = {
+      "eks.amazonaws.com/role-arn" = aws_iam_role.aws_load_balancer_controller_role.arn
+    }
   }
 }
 

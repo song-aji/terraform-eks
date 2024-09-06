@@ -1,0 +1,96 @@
+# Web (Frontend) Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-deployment
+  labels:
+    app: web
+spec:
+  replicas: 2  # 웹 서버의 복제본 수
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: web
+        image: nginx:latest  # Nginx 웹 서버 이미지
+        ports:
+        - containerPort: 80
+---
+# Web (Frontend) Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+  labels:
+    app: web
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: web
+  type: ClusterIP  # 외부에서 직접 접근할 수 없도록 설정 (ALB를 통해 접근)
+---
+# WAS (Backend) Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: was-deployment
+  labels:
+    app: was
+spec:
+  replicas: 2  # WAS의 복제본 수
+  selector:
+    matchLabels:
+      app: was
+  template:
+    metadata:
+      labels:
+        app: was
+    spec:
+      containers:
+      - name: was
+        image: nginx:latest  # WAS 애플리케이션 이미지
+        ports:
+        - containerPort: 8080
+---
+# WAS (Backend) Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: was-service
+  labels:
+    app: was
+spec:
+  ports:
+  - port: 8080
+    targetPort: 8080
+  selector:
+    app: was
+  type: ClusterIP  # 클러스터 내부에서만 접근 가능
+---
+# Ingress 설정: ALB와 연결
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-ingress
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/load-balancer-arn: arn:aws:elasticloadbalancing:ap-northeast-2:024848474197:loadbalancer/app/chanwoo-alb/7d6acc146fa80684  # Terraform으로 생성한 ALB의 ARN
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-service
+            port:
+              number: 80
+
