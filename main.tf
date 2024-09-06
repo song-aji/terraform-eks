@@ -43,8 +43,8 @@ resource "aws_subnet" "public_subnet_a" {
   map_public_ip_on_launch = true
   tags = {
     Name                              = "chanwoo-public-subnet-a"
-    "kubernetes.io/role/elb"          = "1"        
-    "kubernetes.io/cluster/eks-cluster" = "shared"
+    "kubernetes.io/role/elb"          = "1"        # ELB용 퍼블릭 서브넷 태그
+    "kubernetes.io/cluster/eks-cluster" = "shared" # 클러스터 태그
   }
 }
 
@@ -56,8 +56,8 @@ resource "aws_subnet" "public_subnet_c" {
   map_public_ip_on_launch = true
   tags = {
     Name                              = "chanwoo-public-subnet-c"
-    "kubernetes.io/role/elb"          = "1"
-    "kubernetes.io/cluster/eks-cluster" = "shared"
+    "kubernetes.io/role/elb"          = "1"        # ELB용 퍼블릭 서브넷 태그
+    "kubernetes.io/cluster/eks-cluster" = "shared" # 클러스터 태그
   }
 }
 
@@ -78,7 +78,7 @@ resource "aws_lb" "example_alb" {
   name               = "chanwoo-alb"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb_sg.id]
+  security_groups    = [aws_security_group.alb_sg.id]  # ALB용 보안 그룹
   subnets            = [aws_subnet.public_subnet_a.id, aws_subnet.public_subnet_c.id]
 
   tags = {
@@ -127,7 +127,7 @@ resource "aws_security_group" "alb_sg" {
   }
 
   ingress {
-    from_port   = 443
+    from_port   = 443  # HTTPS를 사용하는 경우
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
@@ -224,18 +224,19 @@ resource "aws_security_group" "eks_security_group" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # ALB와 통신을 위한 규칙 추가
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
+    security_groups = [aws_security_group.alb_sg.id]  # ALB 보안 그룹과 연결
   }
 
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
+    security_groups = [aws_security_group.alb_sg.id]  # ALB 보안 그룹과 연결
   }
   
   egress {
@@ -352,19 +353,19 @@ resource "aws_eks_node_group" "eks_node_group" {
   }
 }
 
-# IAM 정책 파일을 외부 URL에서 다운로드
-resource "null_resource" "download_iam_policy" {
-  provisioner "local-exec" {
-    command = "mkdir -p ./policies && curl -o ./policies/aws_load_balancer_controller_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json"
-  }
+# IAM 정책 파일 다운로드 및 저장
+resource "local_file" "downloaded_iam_policy" {
+  filename = "${path.module}/policies/aws_load_balancer_controller_policy.json"
+  content  = file("https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json")
 }
 
-# Application Load Balancer와 관련된 IAM 정책 및 역할 설정 추가
+# AWS Load Balancer Controller에 필요한 IAM 정책 생성
 resource "aws_iam_policy" "aws_load_balancer_controller_policy" {
   name   = "AWSLoadBalancerControllerIAMPolicy"
-  policy = file("./policies/aws_load_balancer_controller_policy.json")
+  policy = local_file.downloaded_iam_policy.content
 }
 
+# AWS Load Balancer Controller용 IAM 역할 생성
 resource "aws_iam_role" "aws_load_balancer_controller_role" {
   name = "aws-load-balancer-controller-role"
 
@@ -380,6 +381,7 @@ resource "aws_iam_role" "aws_load_balancer_controller_role" {
   })
 }
 
+# AWS Load Balancer Controller용 정책을 IAM 역할에 부착
 resource "aws_iam_role_policy_attachment" "attach_lb_policy" {
   policy_arn = aws_iam_policy.aws_load_balancer_controller_policy.arn
   role       = aws_iam_role.aws_load_balancer_controller_role.name
@@ -401,11 +403,11 @@ data "aws_caller_identity" "current" {}
 
 # EKS 클러스터 정보를 가져오는 데이터 소스
 data "aws_eks_cluster" "cluster" {
-  name = "chanwoo-cluster"
+  name = aws_eks_cluster.my_eks_cluster.name
 }
 
 data "aws_eks_cluster_auth" "auth" {
-  name = "chanwoo-cluster"
+  name = aws_eks_cluster.my_eks_cluster.name
 }
 
 # Terraform Cloud 백엔드 설정
