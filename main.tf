@@ -353,63 +353,6 @@ resource "aws_eks_node_group" "eks_node_group" {
   }
 }
 
-# IAM 정책 파일을 외부 URL에서 다운로드하여 로컬에 저장
-resource "local_file" "download_iam_policy" {
-  filename = "${path.module}/policies/aws_load_balancer_controller_policy.json"
-  content  = templatefile("https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json", {})
-}
-
-# Application Load Balancer와 관련된 IAM 정책 생성
-resource "aws_iam_policy" "aws_load_balancer_controller_policy" {
-  name   = "AWSLoadBalancerControllerIAMPolicy"
-  policy = local_file.download_iam_policy.content
-}
-
-# AWS Load Balancer Controller용 IAM 역할 생성
-resource "aws_iam_role" "aws_load_balancer_controller_role" {
-  name = "aws-load-balancer-controller-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Action = "sts:AssumeRole",
-      Effect = "Allow",
-      Principal = {
-        Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${data.aws_eks_cluster.cluster.identity[0].oidc.issuer}"
-      }
-    }]
-  })
-}
-
-# AWS Load Balancer Controller에 필요한 IAM 정책을 역할에 부착
-resource "aws_iam_role_policy_attachment" "attach_lb_policy" {
-  policy_arn = aws_iam_policy.aws_load_balancer_controller_policy.arn
-  role       = aws_iam_role.aws_load_balancer_controller_role.name
-}
-
-# Kubernetes 서비스 어카운트와 IAM 역할 연동 설정
-resource "kubernetes_service_account" "aws_load_balancer_controller_sa" {
-  metadata {
-    name      = "aws-load-balancer-controller"
-    namespace = "kube-system"
-    annotations = {
-      "eks.amazonaws.com/role-arn" = aws_iam_role.aws_load_balancer_controller_role.arn
-    }
-  }
-}
-
-# AWS 계정 정보를 가져오는 데이터 소스
-data "aws_caller_identity" "current" {}
-
-# EKS 클러스터 정보를 가져오는 데이터 소스
-data "aws_eks_cluster" "cluster" {
-  name = aws_eks_cluster.my_eks_cluster.name
-}
-
-data "aws_eks_cluster_auth" "auth" {
-  name = aws_eks_cluster.my_eks_cluster.name
-}
-
 # Terraform Cloud 백엔드 설정
 terraform {
   backend "remote" {
