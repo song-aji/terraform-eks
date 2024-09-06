@@ -3,6 +3,42 @@ provider "aws" {
   region = "ap-northeast-2"
 }
 
+# EKS 클러스터 역할 생성
+resource "aws_iam_role" "eks_cluster_role" {
+  name = "eks-cluster-role"
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "eks.amazonaws.com"
+      }
+    }
+  ]
+}
+EOF
+
+  managed_policy_arns = [
+    "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+    "arn:aws:iam::aws:policy/AmazonEKSServicePolicy",
+  ]
+}
+
+# AWS 계정 정보를 가져오는 데이터 소스
+data "aws_caller_identity" "current" {}
+
+# EKS 클러스터 정보를 가져오는 데이터 소스
+data "aws_eks_cluster" "cluster" {
+  name = aws_eks_cluster.my_eks_cluster.name
+}
+
+data "aws_eks_cluster_auth" "auth" {
+  name = aws_eks_cluster.my_eks_cluster.name
+}
+
 # VPC 생성
 resource "aws_vpc" "eks_vpc" {
   cidr_block           = "10.0.0.0/16"
@@ -247,7 +283,7 @@ resource "aws_security_group" "eks_security_group" {
 # Application Load Balancer와 관련된 IAM 정책 및 역할 설정 추가
 resource "aws_iam_policy" "aws_load_balancer_controller_policy" {
   name   = "AWSLoadBalancerControllerIAMPolicy"
-  policy = file("path/to/iam_policy.json")  # 다운받은 정책 JSON 파일 경로
+  policy = file("./policies/aws_load_balancer_controller_policy.json")
 }
 
 resource "aws_iam_role" "aws_load_balancer_controller_role" {
