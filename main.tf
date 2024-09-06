@@ -3,42 +3,6 @@ provider "aws" {
   region = "ap-northeast-2"
 }
 
-# EKS 클러스터 역할 생성
-resource "aws_iam_role" "eks_cluster_role" {
-  name = "eks-cluster-role"
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Action": "sts:AssumeRole",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "eks.amazonaws.com"
-      }
-    }
-  ]
-}
-EOF
-
-  managed_policy_arns = [
-    "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
-    "arn:aws:iam::aws:policy/AmazonEKSServicePolicy",
-  ]
-}
-
-# AWS 계정 정보를 가져오는 데이터 소스
-data "aws_caller_identity" "current" {}
-
-# EKS 클러스터 정보를 가져오는 데이터 소스
-data "aws_eks_cluster" "cluster" {
-  name = aws_eks_cluster.my_eks_cluster.name
-}
-
-data "aws_eks_cluster_auth" "auth" {
-  name = aws_eks_cluster.my_eks_cluster.name
-}
-
 # VPC 생성
 resource "aws_vpc" "eks_vpc" {
   cidr_block           = "10.0.0.0/16"
@@ -79,8 +43,8 @@ resource "aws_subnet" "public_subnet_a" {
   map_public_ip_on_launch = true
   tags = {
     Name                              = "chanwoo-public-subnet-a"
-    "kubernetes.io/role/elb"          = "1"        # ELB용 퍼블릭 서브넷 태그
-    "kubernetes.io/cluster/eks-cluster" = "shared" # 클러스터 태그
+    "kubernetes.io/role/elb"          = "1"        
+    "kubernetes.io/cluster/eks-cluster" = "shared"
   }
 }
 
@@ -92,8 +56,8 @@ resource "aws_subnet" "public_subnet_c" {
   map_public_ip_on_launch = true
   tags = {
     Name                              = "chanwoo-public-subnet-c"
-    "kubernetes.io/role/elb"          = "1"        # ELB용 퍼블릭 서브넷 태그
-    "kubernetes.io/cluster/eks-cluster" = "shared" # 클러스터 태그
+    "kubernetes.io/role/elb"          = "1"
+    "kubernetes.io/cluster/eks-cluster" = "shared"
   }
 }
 
@@ -114,7 +78,7 @@ resource "aws_lb" "example_alb" {
   name               = "chanwoo-alb"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb_sg.id]  # ALB용 보안 그룹
+  security_groups    = [aws_security_group.alb_sg.id]
   subnets            = [aws_subnet.public_subnet_a.id, aws_subnet.public_subnet_c.id]
 
   tags = {
@@ -163,7 +127,7 @@ resource "aws_security_group" "alb_sg" {
   }
 
   ingress {
-    from_port   = 443  # HTTPS를 사용하는 경우
+    from_port   = 443
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
@@ -260,14 +224,20 @@ resource "aws_security_group" "eks_security_group" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # ALB와 통신을 위한 규칙 추가
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]  # ALB 보안 그룹과 연결
+    security_groups = [aws_security_group.alb_sg.id]
   }
 
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
+  
   egress {
     from_port   = 0
     to_port     = 0
@@ -280,30 +250,28 @@ resource "aws_security_group" "eks_security_group" {
   }
 }
 
-# Application Load Balancer와 관련된 IAM 정책 및 역할 설정 추가
-resource "aws_iam_policy" "aws_load_balancer_controller_policy" {
-  name   = "AWSLoadBalancerControllerIAMPolicy"
-  policy = file("./policies/aws_load_balancer_controller_policy.json")
-}
-
-resource "aws_iam_role" "aws_load_balancer_controller_role" {
-  name = "aws-load-balancer-controller-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${data.aws_eks_cluster.cluster.identity[0].oidc.issuer}"
+# EKS 클러스터 역할 생성
+resource "aws_iam_role" "eks_cluster_role" {
+  name = "eks-cluster-role"
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "eks.amazonaws.com"
       }
-    }]
-  })
+    }
+  ]
 }
+EOF
 
-resource "aws_iam_role_policy_attachment" "attach_lb_policy" {
-  policy_arn = aws_iam_policy.aws_load_balancer_controller_policy.arn
-  role       = aws_iam_role.aws_load_balancer_controller_role.name
+  managed_policy_arns = [
+    "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+    "arn:aws:iam::aws:policy/AmazonEKSServicePolicy",
+  ]
 }
 
 # EKS 클러스터 생성
@@ -325,6 +293,31 @@ resource "aws_eks_cluster" "my_eks_cluster" {
   tags = {
     Name = "chanwoo-eks-cluster"
   }
+}
+
+# EKS 노드 그룹 역할 생성
+resource "aws_iam_role" "eks_node_role" {
+  name = "eks-node-role"
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      }
+    }
+  ]
+}
+EOF
+
+  managed_policy_arns = [
+    "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+    "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+  ]
 }
 
 # EKS 노드 그룹 생성
@@ -359,6 +352,39 @@ resource "aws_eks_node_group" "eks_node_group" {
   }
 }
 
+# IAM 정책 파일을 외부 URL에서 다운로드
+resource "null_resource" "download_iam_policy" {
+  provisioner "local-exec" {
+    command = "mkdir -p ./policies && curl -o ./policies/aws_load_balancer_controller_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json"
+  }
+}
+
+# Application Load Balancer와 관련된 IAM 정책 및 역할 설정 추가
+resource "aws_iam_policy" "aws_load_balancer_controller_policy" {
+  name   = "AWSLoadBalancerControllerIAMPolicy"
+  policy = file("./policies/aws_load_balancer_controller_policy.json")
+}
+
+resource "aws_iam_role" "aws_load_balancer_controller_role" {
+  name = "aws-load-balancer-controller-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Action = "sts:AssumeRole",
+      Effect = "Allow",
+      Principal = {
+        Federated = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${data.aws_eks_cluster.cluster.identity[0].oidc.issuer}"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "attach_lb_policy" {
+  policy_arn = aws_iam_policy.aws_load_balancer_controller_policy.arn
+  role       = aws_iam_role.aws_load_balancer_controller_role.name
+}
+
 # Kubernetes 서비스 어카운트와 IAM 역할 연동 설정
 resource "kubernetes_service_account" "aws_load_balancer_controller_sa" {
   metadata {
@@ -368,6 +394,18 @@ resource "kubernetes_service_account" "aws_load_balancer_controller_sa" {
       "eks.amazonaws.com/role-arn" = aws_iam_role.aws_load_balancer_controller_role.arn
     }
   }
+}
+
+# AWS 계정 정보를 가져오는 데이터 소스
+data "aws_caller_identity" "current" {}
+
+# EKS 클러스터 정보를 가져오는 데이터 소스
+data "aws_eks_cluster" "cluster" {
+  name = "chanwoo-cluster"
+}
+
+data "aws_eks_cluster_auth" "auth" {
+  name = "chanwoo-cluster"
 }
 
 # Terraform Cloud 백엔드 설정
