@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Want Peace with MOKONIX : login</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://code.jquery.com/jquery-latest.min.js"></script>
+</head>
+<body>
+    <section class="login-form">
+        <h1>Want Peace</h1>
+        <form action="">
+            <div class="int-area">
+                <input type="text" name="email" id="id" autocomplete="off" required>
+                <label for="id">USER NAME</label>
+            </div>
+            <div class="int-area">
+                <input type="password" name="password" id="pw" autocomplete="off" required>
+                <label for="pw">PASSWORD</label>
+            </div>
+            <div class="btn-area">
+                <button type="submit" id="btn">LOGIN</button>
+            </div>
+        </form>
+        <div class="cpation">
+            <a href="">Forgot Password?</a>
+        </div>
+    </section>
+
+    <script>
+        let id = $('#id');
+        let pw = $('#pw');
+        let btn = $('#btn');
+
+        $(btn).on('click', function(event) {
+            event.preventDefault();  // 기본 폼 제출 이벤트 막기
+
+            if ($(id).val() == "") {
+                $(id).next('label').addClass('warning');
+                setTimeout(function() {
+                    $('label').removeClass('warning')
+                }, 1500);
+            } else if ($(pw).val() == "") {
+                $(pw).next('label').addClass('warning');
+                setTimeout(function() {
+                    $('label').removeClass('warning')
+                }, 1500);
+            } else {
+                // AJAX로 로그인 요청 보내기
+                $.ajax({
+                    type: 'POST',
+                    url: '/api/login',  // 백엔드 로그인 API 경로 (수정됨)
+                    data: JSON.stringify({
+                        email: $(id).val(),  // 'id' 대신 'email' 사용
+                        password: $(pw).val()  // 'pw' 대신 'password' 사용
+                    }),
+                    contentType: 'application/json',
+                    success: function(response) {
+                        alert(response.message);  // 로그인 성공 시 메시지 출력
+                        // JWT 토큰을 로컬 스토리지에 저장 (추후 API 요청에 사용할 수 있음)
+                        localStorage.setItem('token', response.token);
+                         window.location.href = 'js/chat.html';  // 로그인 성공 후 리디렉션
+                    },
+                    error: function(xhr, status, error) {
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            alert(response.message);  // 로그인 실패 시 메시지 출력
+                        } catch (e) {
+                            alert("An error occurred during login.");
+                        }
+                    }
+                });
+            }
+        });
+    </script>
+
+</body>
+</html>
+
